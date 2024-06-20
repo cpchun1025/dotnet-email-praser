@@ -1,41 +1,28 @@
-using Microsoft.Graph;
-using Microsoft.Identity.Client;
-using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using System.Text.RegularExpressions;
 
-var builder = WebApplication.CreateBuilder(args);
+var host = Host.CreateDefaultBuilder(args)
+    .ConfigureServices((context, services) =>
+    {
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseSqlServer(context.Configuration.GetConnectionString("DefaultConnection")));
 
-// Register services
-builder.Services.AddSingleton<EmailService>(provider =>
-{
-    var configuration = builder.Configuration;
-    return new EmailService(
-        configuration["Graph:ClientId"],
-        configuration["Graph:TenantId"],
-        configuration["Graph:ClientSecret"]
-    );
-});
+        services.AddSingleton<TemplateMatcher>(provider =>
+        {
+            var matcher = new TemplateMatcher();
+            matcher.AddTemplate(new Regex(@"HSBC.*Credit Card Transaction.*Notification", RegexOptions.IgnoreCase), new Template1());
+            matcher.AddTemplate(new Regex(@"HSBC.*Personal Credit Card.*eAlert", RegexOptions.IgnoreCase), new Template2());
+            matcher.AddTemplate(new Regex(@"^(FW:|RE:)\s+.*COMPANYNAME(?:\s+WITH)?(?:\s+CODE)?\s*:\s*(?:[A-Z]{3})?(?:[A-Z]{3})?\s*-\s*(?:USERNAME)?(?:\s+PRODUCT)?(?:\s+ANYTHING)?$", RegexOptions.IgnoreCase), new ComplexTemplate());
+            // Add more templates as needed
+            return matcher;
+        });
 
-builder.Services.AddSingleton<TemplateMatcher>(provider =>
-{
-    var matcher = new TemplateMatcher();
-    matcher.AddTemplate(new Regex(@"HSBC.*Credit Card Transaction.*Notification", RegexOptions.IgnoreCase), new Template1());
-    matcher.AddTemplate(new Regex(@"HSBC.*Personal Credit Card.*eAlert", RegexOptions.IgnoreCase), new Template2());
-    // Add more templates as needed
-    return matcher;
-});
+        services.AddTransient<EmailService>();
+        services.AddTransient<EmailProcessor>();
+        services.AddHostedService<BackgroundEmailProcessor>();
+    })
+    .Build();
 
-builder.Services.AddTransient<EmailProcessor>();
-
-var app = builder.Build();
-
-// Define minimal API endpoints
-app.MapGet("/process-emails", async (EmailProcessor emailProcessor) =>
-{
-    var processedEmails = await emailProcessor.ProcessEmailsAsync();
-    return Results.Ok(processedEmails);
-});
-
-app.MapControllers();
-
-app.Run();
+await host.RunAsync();

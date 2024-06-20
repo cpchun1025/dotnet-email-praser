@@ -25,6 +25,6 @@ public class TemplateMatcher
                 return entry.Value;
             }
         }
-        return null; // or throw an exception, or return a default template
+        return null;
     }
 }
