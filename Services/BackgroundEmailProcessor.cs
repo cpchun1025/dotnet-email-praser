@@ -1,19 +1,29 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.ML;
 
 public class BackgroundEmailProcessor : BackgroundService
 {
     private readonly ILogger<BackgroundEmailProcessor> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly PredictionEngine<EmailSubjectData, EmailSubjectPrediction> _predictionEngine;
+    private readonly TemplateMatcher _templateMatcher;
 
-    public BackgroundEmailProcessor(ILogger<BackgroundEmailProcessor> logger, IServiceProvider serviceProvider)
+    public BackgroundEmailProcessor(
+        ILogger<BackgroundEmailProcessor> logger,
+        IServiceProvider serviceProvider,
+        PredictionEngine<EmailSubjectData, EmailSubjectPrediction> predictionEngine,
+        TemplateMatcher templateMatcher)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _predictionEngine = predictionEngine;
+        _templateMatcher = templateMatcher;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -22,47 +32,33 @@ public class BackgroundEmailProcessor : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Background Email Processor is processing.");
-
             using (var scope = _serviceProvider.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                var templateMatcher = scope.ServiceProvider.GetRequiredService<TemplateMatcher>();
 
-                // Fetch raw data
-                var rawEmails = dbContext.RawEmailData
-                    .Where(e => e.Processed == false)
-                    .ToList();
+                var pendingEmails = dbContext.RawEmailData.Where(e => !e.IsProcessed).ToList();
 
-                foreach (var rawEmail in rawEmails)
+                foreach (var email in pendingEmails)
                 {
-                    try
-                    {
-                        // Process data using template matcher
-                        var template = templateMatcher.MatchTemplate(rawEmail.Subject);
-                        if (template != null)
-                        {
-                            var consolidatedEmail = template.ParseEmail(rawEmail);
+                    var emailSubjectData = new EmailSubjectData { Subject = email.Subject };
+                    var prediction = _predictionEngine.Predict(emailSubjectData);
 
-                            // Insert processed data into consolidated table
-                            dbContext.ConsolidatedEmails.Add(consolidatedEmail);
+                    var matchedTemplate = _templateMatcher.Match(prediction.PredictedLabel);
 
-                            // Mark raw data as processed
-                            rawEmail.Processed = true;
-                        }
-                    }
-                    catch (Exception ex)
+                    var consolidatedEmail = new ConsolidatedEmail
                     {
-                        _logger.LogError(ex, "Error processing email with ID {EmailId}", rawEmail.Id);
-                    }
+                        RawEmailDataId = email.Id,
+                        ProcessedTemplate = matchedTemplate.Process(email.Body)
+                    };
+
+                    dbContext.ConsolidatedEmails.Add(consolidatedEmail);
+                    email.IsProcessed = true;
                 }
 
-                // Save changes to the database
-                await dbContext.SaveChangesAsync();
+                await dbContext.SaveChangesAsync(stoppingToken);
             }
 
-            // Wait for a specified interval before processing again
-            await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);  // Adjust the interval as needed
         }
 
         _logger.LogInformation("Background Email Processor is stopping.");

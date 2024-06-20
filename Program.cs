@@ -19,6 +19,15 @@ var host = Host.CreateDefaultBuilder(args)
             return matcher;
         });
 
+        // Load ML.NET model
+        var mlContext = new MLContext();
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "MLModels", "model.zip");
+        var mlModel = mlContext.Model.Load(modelPath, out var modelInputSchema);
+        var predictionEngine = mlContext.Model.CreatePredictionEngine<EmailSubjectData, EmailSubjectPrediction>(mlModel);
+
+        // Register PredictionEngine as a singleton
+        services.AddSingleton(predictionEngine);
+
         services.AddTransient<EmailService>();
         services.AddTransient<EmailProcessor>();
         services.AddHostedService<BackgroundEmailProcessor>();

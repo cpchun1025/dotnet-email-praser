@@ -29,3 +29,12 @@ public class ComplexTemplate : IEmailTemplate
         };
     }
 }
+
+public class ComplexTemplate : EmailTemplate
+{
+    public override string Process(string body)
+    {
+        // Implement complex processing logic
+        return $"Processed by ComplexTemplate: {body}";
+    }
+}
