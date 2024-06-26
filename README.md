@@ -41,3 +41,8 @@ This project is a daemon application that processes emails by matching templates
 - .NET 6.0
 - Entity Framework Core
 - ML.NET
+
+@echo off
+echo Starting the React application...
+cd /d "C:\path\to\your\react\app\build"
+http-server -p 8080
